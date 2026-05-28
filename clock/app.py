@@ -14,16 +14,16 @@ from typing import Callable
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.color import Color
-from textual.containers import Horizontal, VerticalScroll, Vertical
+from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
-from textual.widgets import Input, Label, Static
+from textual.widgets import Static
 
-from .config import Colors, Config
+from .config import Config
 from .keys import Action, dispatch
 from .parse import DurationError, parse_duration
 from .state import (
     DEFAULT_STEP,
+    Editor,
     Stopwatch,
     View,
     adjust,
@@ -42,71 +42,6 @@ from .ui import STACK_MIN_H, active_band, content_min_height, render
 DEFAULT_FPS = 10
 FINISH_BELLS = 4
 FINISH_LINGER = 2.0
-
-
-class DurationModal(ModalScreen[int | None]):
-    """A rofi-style centered prompt for entering a countdown duration.
-
-    Dismisses with the parsed seconds on submit, or ``None`` on cancel.
-    """
-
-    # Layout only; colors are applied from the active palette in on_mount so the
-    # prompt matches whatever --theme is in effect.
-    CSS = """
-    DurationModal { align: center middle; }
-    #dialog { width: 56; height: auto; padding: 1 2; }
-    #prompt { height: 3; }
-    #chip { padding: 0 1; margin: 1 2 0 0; text-style: bold; }
-    #dur { height: 3; }
-    #error { height: 1; }
-    #hint { height: 1; }
-    """
-
-    BINDINGS = [("escape", "cancel", "cancel")]
-
-    def __init__(self, colors: Colors) -> None:
-        super().__init__()
-        self._co = colors
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            with Horizontal(id="prompt"):
-                yield Label("TIMER", id="chip")
-                yield Input(placeholder="e.g. 5m, 30:00, 90s, 1h30m", id="dur")
-            yield Label("", id="error")
-            yield Label("[enter] start    [esc] cancel", id="hint")
-
-    def on_mount(self) -> None:
-        co = self._co
-        bg, ink, soft = Color(*co.bg), Color(*co.ink), Color(*co.ink_soft)
-        faint, accent = Color(*co.faint), Color(*co.accent)
-        # The modal screen's own backdrop defaults to a light surface; theme it
-        # so the area around the dialog matches the active palette.
-        self.styles.background = bg
-        dialog = self.query_one("#dialog")
-        dialog.styles.background = bg
-        dialog.styles.border = ("round", faint)
-        chip = self.query_one("#chip")
-        chip.styles.background = accent
-        chip.styles.color = bg
-        inp = self.query_one("#dur", Input)
-        inp.styles.background = bg
-        inp.styles.color = ink
-        inp.styles.border = ("tall", faint)
-        self.query_one("#error", Label).styles.color = accent
-        self.query_one("#hint", Label).styles.color = soft
-        inp.focus()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        try:
-            total = parse_duration(event.value)
-        except DurationError as exc:
-            self.query_one("#error", Label).update(str(exc))
-            return
-        self.dismiss(total)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
 
 class ClockApp(App):
@@ -136,6 +71,7 @@ class ClockApp(App):
         self.state = new_timer(total_seconds or 0, wallclock())
         self.stopwatch = Stopwatch()
         self.view = View()
+        self.editor = Editor()
         self._keybinds = dict(self._cfg.keybinds)
         self._last_frame: str | None = None
         self._rendered_h = STACK_MIN_H
@@ -169,16 +105,50 @@ class ClockApp(App):
         self.set_timer(FINISH_LINGER, self.exit)
 
     def on_key(self, event) -> None:
+        # While the inline duration editor is open it owns all keystrokes so
+        # typing a duration never triggers section actions.
+        if self.editor.active:
+            self._edit_key(event)
+            return
         action = dispatch(self.view.active, event.key, self._keybinds)
         if action is not None:
             self._apply(action)
+
+    def _edit_key(self, event) -> None:
+        key = event.key
+        if key == "enter":
+            self._commit_edit()
+        elif key == "escape":
+            self.editor = Editor()
+            self._draw()
+        elif key == "backspace":
+            self.editor = Editor(active=True, buffer=self.editor.buffer[:-1])
+            self._draw()
+        elif event.character and event.character.isprintable() and len(event.character) == 1:
+            self.editor = Editor(active=True, buffer=self.editor.buffer + event.character)
+            self._draw()
+
+    def _commit_edit(self) -> None:
+        try:
+            total = parse_duration(self.editor.buffer)
+        except DurationError as exc:
+            self.editor = Editor(active=True, buffer=self.editor.buffer, error=str(exc))
+            self._draw()
+            return
+        self.editor = Editor()
+        self.state = new_timer(total, self._wallclock())
+        self._configured = True
+        self._alerted = False
+        self._last = self._monotonic()
+        self._draw()
 
     def _apply(self, action: Action) -> None:
         if action is Action.QUIT:
             self.exit()
             return
         if action is Action.SET_TIMER:
-            self._open_picker()
+            self.editor = Editor(active=True)
+            self._draw()
             return
         if action is Action.FOCUS_NEXT:
             self.view = focus_next(self.view)
@@ -202,9 +172,6 @@ class ClockApp(App):
             self._alerted = False
         self._draw()
 
-    def _open_picker(self) -> None:
-        self.push_screen(DurationModal(self._cfg.colors), self._on_duration_chosen)
-
     def _scroll_to_focus(self) -> None:
         """Bring the focused section's band into view (no-op when it all fits)."""
         try:
@@ -213,16 +180,6 @@ class ClockApp(App):
             return
         y0, _ = active_band(self.view.active, self._rendered_h)
         sc.scroll_to(y=y0, animate=False)
-
-    def _on_duration_chosen(self, total: int | None) -> None:
-        if total is None:
-            # Cancelled: fall back to (or keep) the default blank-timer view.
-            return
-        self.state = new_timer(total, self._wallclock())
-        self._configured = True
-        self._alerted = False
-        self._last = self._monotonic()
-        self._draw()
 
     def on_resize(self, event) -> None:
         self._draw()
@@ -243,10 +200,10 @@ class ClockApp(App):
             # Content is taller than the viewport: render its full height (less
             # one column for the scrollbar) so the container can scroll it.
             self._rendered_h = min_h
-            frame = render(self.state, (w - 1, min_h), self.view, self.stopwatch, co)
+            frame = render(self.state, (w - 1, min_h), self.view, self.stopwatch, co, self.editor)
         else:
             self._rendered_h = vh
-            frame = render(self.state, (w, vh), self.view, self.stopwatch, co)
+            frame = render(self.state, (w, vh), self.view, self.stopwatch, co, self.editor)
 
         # Skip the (expensive) ANSI parse + widget update when nothing changed.
         if frame == self._last_frame:

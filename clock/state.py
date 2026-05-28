@@ -107,6 +107,15 @@ class View:
     active: Section = Section.TIMER
 
 
+@dataclass(frozen=True)
+class Editor:
+    """Inline duration entry shown in the TIMER section (replaces the modal)."""
+
+    active: bool = False
+    buffer: str = ""
+    error: str | None = None
+
+
 def focus_next(view: View) -> View:
     i = FOCUS_ORDER.index(view.active)
     return replace(view, active=FOCUS_ORDER[(i + 1) % len(FOCUS_ORDER)])

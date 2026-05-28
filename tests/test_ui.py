@@ -5,11 +5,11 @@ from datetime import datetime
 from clock.keys import Section
 from clock.state import Stopwatch, View, new_timer
 from clock.ui import (
-    SECTION_SPECS,
+    ROW_SPECS,
     STACK_MIN_H,
     distribute,
     render,
-    section_bands,
+    section_rects,
 )
 
 T0 = datetime(2026, 5, 28, 14, 33, 0)
@@ -44,37 +44,45 @@ def line_with(out: str, needle: str) -> int:
 
 def test_distribute_sums_to_avail():
     for avail in range(STACK_MIN_H, STACK_MIN_H + 40):
-        heights = distribute(SECTION_SPECS, avail - 1)  # minus footer
+        heights = distribute(ROW_SPECS, avail - 1)  # minus footer
         assert sum(heights) == avail - 1
 
 
 def test_distribute_returns_minimums_on_overflow():
-    base = [s.min_h for s in SECTION_SPECS]
-    assert distribute(SECTION_SPECS, 1) == base
-    assert distribute(SECTION_SPECS, sum(base)) == base
+    base = [s.min_h for s in ROW_SPECS]
+    assert distribute(ROW_SPECS, 1) == base
+    assert distribute(ROW_SPECS, sum(base)) == base
 
 
-def test_distribute_gives_slack_to_flex_sections():
-    base = [s.min_h for s in SECTION_SPECS]
-    heights = distribute(SECTION_SPECS, sum(base) + 10)
-    # STOPWATCH has flex 0, so its height is unchanged; flex sections grew.
-    assert heights[1] == base[1]
-    assert heights[0] > base[0] and heights[2] > base[2]
+def test_distribute_gives_slack_to_flex_rows():
+    base = [s.min_h for s in ROW_SPECS]
+    heights = distribute(ROW_SPECS, sum(base) + 10)
+    # Both rows flex, so both grow above their minimums.
+    assert all(h > b for h, b in zip(heights, base))
 
 
 def test_distribute_no_flex_dumps_slack_on_last():
-    specs = tuple(replace(s, flex=0) for s in SECTION_SPECS)
+    specs = tuple(replace(s, flex=0) for s in ROW_SPECS)
     base = [s.min_h for s in specs]
     heights = distribute(specs, sum(base) + 7)
     assert heights[:-1] == base[:-1]
     assert heights[-1] == base[-1] + 7
 
 
-def test_section_bands_are_contiguous_and_ordered():
-    bands = section_bands(40)
-    assert [b[0] for b in bands] == [s.section for s in SECTION_SPECS]
-    for (_, _, y1), (_, y0_next, _) in zip(bands, bands[1:]):
-        assert y0_next == y1 + 1
+def test_section_rects_layout():
+    rects = section_rects(120, 40)
+    by = {sec: (x0, y0, x1, y1) for sec, x0, y0, x1, y1 in rects}
+    assert set(by) == {Section.TIMER, Section.TIME, Section.STOPWATCH}
+    # TIMER spans the full width on top.
+    tx0, ty0, tx1, ty1 = by[Section.TIMER]
+    assert (tx0, ty0, tx1) == (0, 0, 119)
+    # Bottom row sits directly below TIMER, split into TIME (2/3) | STOPWATCH.
+    mx0, my0, mx1, my1 = by[Section.TIME]
+    sx0, sy0, sx1, sy1 = by[Section.STOPWATCH]
+    assert my0 == sy0 == ty1 + 1
+    assert mx0 == 0 and sx1 == 119
+    assert sx0 == mx1 + 1
+    assert mx1 - mx0 > sx1 - sx0  # TIME is the wider column
 
 
 # --------------------------------------------------------------------------- #
@@ -136,6 +144,14 @@ def test_stopwatch_status_reflects_running():
     assert "RUNNING" in running
     ready = strip(render(state(), WIDE, stopwatch=Stopwatch()))
     assert "READY" in ready
+
+
+def test_stopwatch_uses_block_font_in_narrow_column():
+    # The 1/3-width stopwatch column is too narrow for the spaced block glyphs;
+    # it must tighten the kerning and stay block, not drop to plain text.
+    out = strip(render(state(), (96, 34), View(active=Section.TIME), Stopwatch()))
+    assert "0:00.0" not in out  # the plain-text fallback would show this literally
+    assert "█" in out
 
 
 def test_timer_status_reflects_pause():

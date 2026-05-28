@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from clock.app import ClockApp, DurationModal
+from clock.app import ClockApp
 from clock.config import DEFAULT_KEYBINDS, Config
 from clock.keys import Section
 
@@ -149,11 +149,11 @@ def make_unconfigured(monotonic_value=1000.0):
 
 
 @pytest.mark.asyncio
-async def test_no_duration_shows_default_view_without_picker():
+async def test_no_duration_shows_default_view_without_editor():
     app = make_unconfigured()
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert not isinstance(app.screen, DurationModal)
+        assert app.editor.active is False
         assert app._configured is False
         assert app.state.total_seconds == 0
 
@@ -165,26 +165,51 @@ async def test_set_timer_from_default_view():
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
-        assert isinstance(app.screen, DurationModal)
+        assert app.editor.active
         await pilot.press("5", "m", "enter")
         await pilot.pause()
         assert app._configured
         assert app.state.total_seconds == 300
-        assert not isinstance(app.screen, DurationModal)
+        assert app.editor.active is False
 
 
 @pytest.mark.asyncio
-async def test_cancel_picker_keeps_default_view():
+async def test_cancel_editor_keeps_default_view():
     app = make_unconfigured()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
+        assert app.editor.active
         await pilot.press("escape")
         await pilot.pause()
-        assert not isinstance(app.screen, DurationModal)
+        assert app.editor.active is False
         assert app._configured is False
     assert app.return_code is None
+
+
+@pytest.mark.asyncio
+async def test_editor_invalid_input_shows_error_and_holds():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.press("x", "enter")  # not a valid duration
+        await pilot.pause()
+        assert app.editor.active  # stays open
+        assert app.editor.error is not None
+        assert app._configured is False
+
+
+@pytest.mark.asyncio
+async def test_editor_backspace_edits_buffer():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.press("5", "9", "backspace", "m", "enter")
+        await pilot.pause()
+        assert app.state.total_seconds == 300  # "5m" after backspacing the 9
 
 
 @pytest.mark.asyncio
@@ -250,28 +275,12 @@ async def test_c_resets_running_stopwatch_when_focused():
 
 
 @pytest.mark.asyncio
-async def test_picker_backdrop_matches_theme():
-    from textual.color import Color
-    from clock.config import BUILTIN_THEMES
-
-    cfg = Config(colors=BUILTIN_THEMES["dark"])
-    app = ClockApp(None, config=cfg, monotonic=lambda: 1000.0, wallclock=lambda: T0, fps=60)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await pilot.press("e")  # open the picker
-        await pilot.pause()
-        assert isinstance(app.screen, DurationModal)
-        # The modal screen's own backdrop must follow the palette, not default.
-        assert app.screen.styles.background == Color(*cfg.colors.bg)
-
-
-@pytest.mark.asyncio
-async def test_e_key_opens_picker():
+async def test_e_key_opens_editor():
     app = make_app()
     async with app.run_test() as pilot:
         await pilot.press("e")
         await pilot.pause()
-        assert isinstance(app.screen, DurationModal)
+        assert app.editor.active
 
 
 @pytest.mark.asyncio

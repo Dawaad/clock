@@ -18,9 +18,14 @@ FONT = {
 }
 
 
-def compose_number(text: str, scale: int = 1) -> list[str]:
-    """Render ``text`` as rows of '#'/' ' at the given integer scale."""
-    base = [" ".join(FONT[c][r] for c in text) for r in range(7)]
+def compose_number(text: str, scale: int = 1, gap: int = 1) -> list[str]:
+    """Render ``text`` as rows of '#'/' ' at the given integer scale.
+
+    ``gap`` is the number of blank columns between glyphs; drop it to 0 to fit
+    the same block font into a narrower space instead of falling back to plain.
+    """
+    sep = " " * gap
+    base = [sep.join(FONT[c][r] for c in text) for r in range(7)]
     if scale <= 1:
         return base
     out: list[str] = []

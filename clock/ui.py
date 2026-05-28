@@ -31,7 +31,7 @@ from .font import compose_number
 from .keys import Action, Section, global_binds, primary_glyph, section_binds
 from .parse import format_hms, format_readout
 from .raster import Frame
-from .state import Stopwatch, TimerState, View
+from .state import Editor, Stopwatch, TimerState, View
 
 _DEFAULT_COLORS = Colors()
 _DEFAULT_VIEW = View()
@@ -44,35 +44,36 @@ SIDE_BY_SIDE_W = 48
 
 
 @dataclass(frozen=True)
-class SectionSpec:
-    section: Section
+class RowSpec:
     min_h: int
     flex: int = 0
 
 
-# Stacked top-to-bottom. TIMER and TIME flex to absorb extra height; STOPWATCH
-# stays compact.
-SECTION_SPECS: tuple[SectionSpec, ...] = (
-    SectionSpec(Section.TIMER, min_h=12, flex=1),
-    SectionSpec(Section.STOPWATCH, min_h=10),
-    SectionSpec(Section.TIME, min_h=12, flex=1),
+# Two stacked rows: TIMER on top (full width), then a bottom row split into
+# TIME (left 2/3) and STOPWATCH (right 1/3). Both rows flex to absorb height.
+ROW_SPECS: tuple[RowSpec, ...] = (
+    RowSpec(min_h=12, flex=1),  # TIMER row
+    RowSpec(min_h=12, flex=1),  # TIME | STOPWATCH row
 )
 FOOTER_H = 1
 
+# Fraction of the width the TIME column takes in the bottom row.
+TIME_FRACTION = 2 / 3
+
 # Smallest frame that shows every section at its natural height; the app renders
 # at least this tall and scrolls when the viewport is shorter.
-STACK_MIN_H = sum(s.min_h for s in SECTION_SPECS) + FOOTER_H
+STACK_MIN_H = sum(r.min_h for r in ROW_SPECS) + FOOTER_H
 
 
 def content_min_height() -> int:
     return STACK_MIN_H
 
 
-def distribute(specs: tuple[SectionSpec, ...], avail: int) -> list[int]:
-    """Heights per section that sum to ``avail`` (flex absorbs the slack).
+def distribute(specs: tuple[RowSpec, ...], avail: int) -> list[int]:
+    """Heights per row that sum to ``avail`` (flex absorbs the slack).
 
     When ``avail`` is at most the combined minimum, return the minimums as-is so
-    the caller can scroll the overflow. Slack is split across flex sections by
+    the caller can scroll the overflow. Slack is split across flex rows by
     largest-remainder so the heights are integers and sum exactly.
     """
     base = [s.min_h for s in specs]
@@ -88,7 +89,7 @@ def distribute(specs: tuple[SectionSpec, ...], avail: int) -> list[int]:
     floors = [int(x) for x in shares]
     rem = slack - sum(floors)
     # Hand the leftover units to the largest fractional remainders (flex
-    # sections sort first; zero-flex sections have remainder 0).
+    # rows sort first; zero-flex rows have remainder 0).
     order = sorted(
         range(len(specs)),
         key=lambda i: (shares[i] - floors[i], specs[i].flex),
@@ -99,23 +100,31 @@ def distribute(specs: tuple[SectionSpec, ...], avail: int) -> list[int]:
     return [b + f for b, f in zip(base, floors)]
 
 
-def section_bands(rows: int) -> list[tuple[Section, int, int]]:
-    """(section, y0, y1) bands for the section area (excludes the footer)."""
+def _row_heights(rows: int) -> tuple[int, int]:
+    """(timer-row height, bottom-row height) for the section area."""
     avail = max(0, rows - FOOTER_H)
-    heights = distribute(SECTION_SPECS, avail)
-    bands: list[tuple[Section, int, int]] = []
-    y = 0
-    for spec, h in zip(SECTION_SPECS, heights):
-        bands.append((spec.section, y, y + h - 1))
-        y += h
-    return bands
+    th, bh = distribute(ROW_SPECS, avail)
+    return th, bh
+
+
+def section_rects(cols: int, rows: int) -> list[tuple[Section, int, int, int, int]]:
+    """(section, x0, y0, x1, y1) rects: TIMER on top, TIME | STOPWATCH below."""
+    th, bh = _row_heights(rows)
+    by0, by1 = th, th + bh - 1
+    split = int(cols * TIME_FRACTION)
+    return [
+        (Section.TIMER, 0, 0, cols - 1, th - 1),
+        (Section.TIME, 0, by0, split - 1, by1),
+        (Section.STOPWATCH, split, by0, cols - 1, by1),
+    ]
 
 
 def active_band(active: Section, rows: int) -> tuple[int, int]:
-    for section, y0, y1 in section_bands(rows):
-        if section is active:
-            return y0, y1
-    return 0, 0
+    """Vertical (y0, y1) band of the row the active section lives in."""
+    th, bh = _row_heights(rows)
+    if active is Section.TIMER:
+        return 0, th - 1
+    return th, th + bh - 1
 
 
 def render(
@@ -124,6 +133,7 @@ def render(
     view: View | None = None,
     stopwatch: Stopwatch | None = None,
     colors: Colors | None = None,
+    editor: Editor | None = None,
 ) -> str:
     cols, rows = size
     co = colors if colors is not None else _DEFAULT_COLORS
@@ -140,10 +150,15 @@ def render(
         Section.STOPWATCH: lambda r: _stopwatch_content(f, sw, *r, co),
         Section.TIME: lambda r: _time_content(f, state, *r, cols, rows, co),
     }
-    for section, y0, y1 in section_bands(rows):
+    rects = section_rects(cols, rows)
+    for section, x0, y0, x1, y1 in rects:
         active = section is vw.active
-        inner = _section(f, 0, y0, cols - 1, y1, section, active, state, sw, co)
+        inner = _section(f, x0, y0, x1, y1, section, active, state, sw, co)
         drawers[section](inner)
+
+    if editor is not None and editor.active:
+        tx0, ty0, tx1, ty1 = next(r[1:] for r in rects if r[0] is Section.TIMER)
+        _editor_box(f, tx0, ty0, tx1, ty1, editor, co)
 
     _footer(f, cols, rows, co)
     return f.emit()
@@ -207,6 +222,32 @@ def _strip_entries(section, state, sw) -> list[tuple[str, str]]:
             continue
         entries.append((primary_glyph(b.keys), b.label))
     return entries
+
+
+def _editor_box(f, rx0, ry0, rx1, ry1, editor, co) -> None:
+    """Inline duration prompt anchored to the TIMER section's bottom-right."""
+    bw = min(40, rx1 - rx0 - 1)
+    body = ["input", "hint"] + (["error"] if editor.error else [])
+    bh = len(body) + 2  # content rows + top/bottom border
+    x1, y1 = rx1 - 2, ry1 - 1
+    x0, y0 = max(rx0 + 2, x1 - bw + 1), max(ry0 + 2, y1 - bh + 1)
+
+    # Clear the area (it overlaps the ring) and draw an accent-bordered box.
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            f.put(x, y, " ", co.ink, co.bg)
+    _box(f, x0, y0, x1, y1, co.accent)
+    f.text(x0 + 2, y0, " SET TIMER ", co.accent)
+
+    iw = x1 - x0 - 3
+    f.put(x0 + 2, y0 + 1, ">", co.ink_soft)
+    if editor.buffer:
+        f.text(x0 + 4, y0 + 1, (editor.buffer + "_")[:iw], co.ink)
+    else:
+        f.text(x0 + 4, y0 + 1, "e.g. 5m, 30:00, 1h30m"[:iw], co.faint)
+    f.text(x0 + 2, y0 + 2, "enter start   esc cancel"[:iw], co.ink_soft)
+    if editor.error:
+        f.text(x0 + 2, y0 + 3, editor.error[:iw], co.accent)
 
 
 def _footer(f, cols, rows, co) -> None:
@@ -353,18 +394,24 @@ def _box(f, x0, y0, x1, y1, c) -> None:
 
 
 def _readout(f, x, top, bottom, w, text, color) -> None:
-    """Big block readout within [top, bottom]; plain text when it won't fit."""
-    glyph_rows = compose_number(text, 1)
-    nh, nw = len(glyph_rows), max(len(r) for r in glyph_rows)
+    """Big block readout within [top, bottom].
+
+    Tries normal kerning first, then a tight (no-gap) variant so narrow columns
+    (e.g. the 1/3-width stopwatch) keep the block font instead of dropping to
+    plain text; plain text is the last resort when even tight won't fit.
+    """
     region_h = bottom - top + 1
-    if region_h >= nh and nw <= w:
-        ty = top + (region_h - nh) // 2
-        for r, line in enumerate(glyph_rows):
-            for col, ch in enumerate(line):
-                if ch == "#":
-                    f.put(x + col, ty + r, "█", color)
-    else:
-        f.text(x, top + max(0, region_h // 2), text[:w], color)
+    for gap in (1, 0):
+        glyph_rows = compose_number(text, 1, gap)
+        nh, nw = len(glyph_rows), max(len(r) for r in glyph_rows)
+        if region_h >= nh and nw <= w:
+            ty = top + (region_h - nh) // 2
+            for r, line in enumerate(glyph_rows):
+                for col, ch in enumerate(line):
+                    if ch == "#":
+                        f.put(x + col, ty + r, "█", color)
+            return
+    f.text(x, top + max(0, region_h // 2), text[:w], color)
 
 
 def _ordinal(n: int) -> str:
