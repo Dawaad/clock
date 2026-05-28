@@ -7,6 +7,7 @@ import sys
 
 from . import __version__
 from .app import run
+from .config import ConfigError, load_config
 from .parse import DurationError, parse_duration
 
 _EXAMPLES = (
@@ -28,6 +29,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="how long to count down (seconds, unit suffixes, or mm:ss / h:mm:ss); "
         "omit to pick a duration in an interactive prompt",
     )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="path to a config file (overrides the discovered user/system config)",
+    )
     parser.add_argument("--version", action="version", version=f"clock {__version__}")
     return parser
 
@@ -43,11 +49,16 @@ def main(argv: list[str] | None = None) -> int:
         except DurationError as exc:
             parser.error(str(exc))  # prints usage + message, exits 2
 
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        parser.error(str(exc))  # prints usage + message, exits 2
+
     if not sys.stdout.isatty():
         print("clock: requires an interactive terminal", file=sys.stderr)
         return 1
 
-    run(total)
+    run(total, config)
     return 0
 
 

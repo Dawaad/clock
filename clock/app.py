@@ -18,21 +18,15 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, Static
 
+from .config import Config
 from .parse import DurationError, parse_duration
 from .state import advance, apply_key, new_timer, with_now
 from .ui import STACK_MIN_H, is_narrow, render
 
 _SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
 
-# Textual key names -> timer reducer key tokens.
-_KEY_MAP = {
-    "space": " ",
-    "p": "p",
-    "plus": "+",
-    "equals_sign": "=",
-    "minus": "-",
-    "underscore": "_",
-}
+# Adjustment actions -> the token the state reducer understands.
+_ACTION_TOKENS = {"pause": " ", "adjust_up": "+", "adjust_down": "-"}
 
 DEFAULT_FPS = 10
 FINISH_BELLS = 4
@@ -103,11 +97,13 @@ class ClockApp(App):
         self,
         total_seconds: int | None,
         *,
+        config: Config | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], datetime] = datetime.now,
         fps: int = DEFAULT_FPS,
     ) -> None:
         super().__init__()
+        self._cfg = config or Config()
         self._monotonic = monotonic
         self._wallclock = wallclock
         self._fps = fps
@@ -115,6 +111,12 @@ class ClockApp(App):
         self._alerted = False
         self._configured = total_seconds is not None
         self.state = new_timer(total_seconds or 0, wallclock())
+        # Flatten {action: keys} into {key: action} for O(1) dispatch on input.
+        self._actions = {
+            key: action
+            for action, keys in self._cfg.keybinds.items()
+            for key in keys
+        }
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="scroll"):
@@ -149,19 +151,20 @@ class ClockApp(App):
 
     def on_key(self, event) -> None:
         key = event.key
-        if key == "q":
+        action = self._actions.get(key)
+        if action == "quit":
             self.exit()
             return
-        if key == "e":
+        if action == "set_timer":
             self._open_picker()
             return
-        if key in _SCROLL_KEYS:
-            self._scroll(key)
-            return
-        token = _KEY_MAP.get(key)
+        token = _ACTION_TOKENS.get(action)
         if token is not None:
             self.state = apply_key(self.state, token)
             self._draw()
+            return
+        if key in _SCROLL_KEYS:
+            self._scroll(key)
 
     def _open_picker(self) -> None:
         self.push_screen(DurationModal(), self._on_duration_chosen)
@@ -209,14 +212,15 @@ class ClockApp(App):
         except NoMatches:
             return
         w, vh = self.size.width, self.size.height
+        co = self._cfg.colors
         if is_narrow(w) and STACK_MIN_H > vh:
             # Stacked content is taller than the viewport: render its full height
             # (less one column for the scrollbar) so the container can scroll it.
-            frame = render(self.state, (w - 1, STACK_MIN_H))
+            frame = render(self.state, (w - 1, STACK_MIN_H), co)
         else:
-            frame = render(self.state, (w, vh))
+            frame = render(self.state, (w, vh), co)
         frame_widget.update(Text.from_ansi(frame))
 
 
-def run(total_seconds: int | None) -> None:
-    ClockApp(total_seconds).run()
+def run(total_seconds: int | None, config: Config | None = None) -> None:
+    ClockApp(total_seconds, config=config).run()
