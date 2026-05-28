@@ -20,14 +20,24 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, Static
 
 from .config import Colors, Config
+from .keys import Action, dispatch
 from .parse import DurationError, parse_duration
-from .state import Stopwatch, advance, apply_key, new_timer, sw_tick, sw_toggle, with_now
-from .ui import STACK_MIN_H, is_narrow, render
-
-_SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
-
-# Adjustment actions -> the token the state reducer understands.
-_ACTION_TOKENS = {"pause": " ", "adjust_up": "+", "adjust_down": "-"}
+from .state import (
+    DEFAULT_STEP,
+    Stopwatch,
+    View,
+    adjust,
+    advance,
+    focus_next,
+    focus_prev,
+    new_timer,
+    sw_reset,
+    sw_tick,
+    sw_toggle,
+    toggle_pause,
+    with_now,
+)
+from .ui import STACK_MIN_H, active_band, content_min_height, render
 
 DEFAULT_FPS = 10
 FINISH_BELLS = 4
@@ -125,12 +135,10 @@ class ClockApp(App):
         self._configured = total_seconds is not None
         self.state = new_timer(total_seconds or 0, wallclock())
         self.stopwatch = Stopwatch()
-        # Flatten {action: keys} into {key: action} for O(1) dispatch on input.
-        self._actions = {
-            key: action
-            for action, keys in self._cfg.keybinds.items()
-            for key in keys
-        }
+        self.view = View()
+        self._keybinds = dict(self._cfg.keybinds)
+        self._last_frame: str | None = None
+        self._rendered_h = STACK_MIN_H
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="scroll"):
@@ -161,41 +169,50 @@ class ClockApp(App):
         self.set_timer(FINISH_LINGER, self.exit)
 
     def on_key(self, event) -> None:
-        key = event.key
-        action = self._actions.get(key)
-        if action == "quit":
+        action = dispatch(self.view.active, event.key, self._keybinds)
+        if action is not None:
+            self._apply(action)
+
+    def _apply(self, action: Action) -> None:
+        if action is Action.QUIT:
             self.exit()
             return
-        if action == "set_timer":
+        if action is Action.SET_TIMER:
             self._open_picker()
             return
-        if key == "s":
+        if action is Action.FOCUS_NEXT:
+            self.view = focus_next(self.view)
+            self.call_after_refresh(self._scroll_to_focus)
+        elif action is Action.FOCUS_PREV:
+            self.view = focus_prev(self.view)
+            self.call_after_refresh(self._scroll_to_focus)
+        elif action is Action.PAUSE:
+            self.state = toggle_pause(self.state)
+        elif action is Action.ADJUST_UP:
+            self.state = adjust(self.state, DEFAULT_STEP)
+        elif action is Action.ADJUST_DOWN:
+            self.state = adjust(self.state, -DEFAULT_STEP)
+        elif action is Action.SW_TOGGLE:
             self.stopwatch = sw_toggle(self.stopwatch)
-            self._draw()
-            return
-        if key == "c" and (self._configured or self._stopwatch_active()):
-            self._clear()
-            return
-        if key in _SCROLL_KEYS:
-            self._scroll(key)
-            return
-        token = _ACTION_TOKENS.get(action)
-        if token is not None:
-            self.state = apply_key(self.state, token)
-            self._draw()
+        elif action is Action.SW_RESET:
+            self.stopwatch = sw_reset(self.stopwatch)
+        elif action is Action.CLEAR_TIMER:
+            self.state = new_timer(0, self._wallclock())
+            self._configured = False
+            self._alerted = False
+        self._draw()
 
     def _open_picker(self) -> None:
         self.push_screen(DurationModal(self._cfg.colors), self._on_duration_chosen)
 
-    def _stopwatch_active(self) -> bool:
-        return self.stopwatch.running or self.stopwatch.elapsed > 0
-
-    def _clear(self) -> None:
-        self.state = new_timer(0, self._wallclock())
-        self._configured = False
-        self._alerted = False
-        self.stopwatch = Stopwatch()
-        self._draw()
+    def _scroll_to_focus(self) -> None:
+        """Bring the focused section's band into view (no-op when it all fits)."""
+        try:
+            sc = self.query_one("#scroll", VerticalScroll)
+        except NoMatches:
+            return
+        y0, _ = active_band(self.view.active, self._rendered_h)
+        sc.scroll_to(y=y0, animate=False)
 
     def _on_duration_chosen(self, total: int | None) -> None:
         if total is None:
@@ -210,24 +227,6 @@ class ClockApp(App):
     def on_resize(self, event) -> None:
         self._draw()
 
-    def _scroll(self, key: str) -> None:
-        try:
-            sc = self.query_one("#scroll", VerticalScroll)
-        except NoMatches:
-            return
-        if key == "up":
-            sc.scroll_up()
-        elif key == "down":
-            sc.scroll_down()
-        elif key == "pageup":
-            sc.scroll_page_up()
-        elif key == "pagedown":
-            sc.scroll_page_down()
-        elif key == "home":
-            sc.scroll_home()
-        elif key == "end":
-            sc.scroll_end()
-
     def _draw(self) -> None:
         # A scheduled interval tick can fire during teardown, after the widget
         # has been unmounted; skip drawing rather than crash.
@@ -239,13 +238,20 @@ class ClockApp(App):
             return
         w, vh = self.size.width, self.size.height
         co = self._cfg.colors
-        if is_narrow(w) and STACK_MIN_H > vh:
-            # Stacked content is taller than the viewport: render its full height
-            # (less one column for the scrollbar) so the container can scroll it.
-            frame = render(self.state, (w - 1, STACK_MIN_H), self.stopwatch, co)            
+        min_h = content_min_height()
+        if min_h > vh:
+            # Content is taller than the viewport: render its full height (less
+            # one column for the scrollbar) so the container can scroll it.
+            self._rendered_h = min_h
+            frame = render(self.state, (w - 1, min_h), self.view, self.stopwatch, co)
         else:
-            frame = render(self.state, (w, vh), self.stopwatch, co)
+            self._rendered_h = vh
+            frame = render(self.state, (w, vh), self.view, self.stopwatch, co)
 
+        # Skip the (expensive) ANSI parse + widget update when nothing changed.
+        if frame == self._last_frame:
+            return
+        self._last_frame = frame
         frame_widget.update(Text.from_ansi(frame))
 
 
