@@ -2,7 +2,19 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from clock.state import advance, apply_key, new_timer, with_now
+from clock.keys import FOCUS_ORDER, Section
+from clock.state import (
+    Stopwatch,
+    View,
+    adjust,
+    advance,
+    focus_next,
+    focus_prev,
+    new_timer,
+    sw_reset,
+    toggle_pause,
+    with_now,
+)
 
 T0 = datetime(2026, 5, 28, 14, 33, 0)
 
@@ -62,48 +74,70 @@ def test_fraction_clamped():
     assert make(60, remaining=0).fraction == 0.0
 
 
-@pytest.mark.parametrize("key", [" ", "p"])
-def test_pause_toggles(key):
+def test_toggle_pause():
     s = make(60)
-    paused = apply_key(s, key)
+    paused = toggle_pause(s)
     assert paused.paused is True
-    assert apply_key(paused, key).paused is False
+    assert toggle_pause(paused).paused is False
 
 
-@pytest.mark.parametrize("key", ["+", "="])
-def test_add_extends_remaining(key):
-    s = apply_key(make(60, remaining=20), key, step=10)
+def test_adjust_up_extends_remaining():
+    s = adjust(make(60, remaining=20), 10)
     assert s.remaining == 30
     assert s.total_seconds == 60  # denominator unchanged when room exists
 
 
-def test_add_grows_total_when_exceeding():
-    s = apply_key(make(60, remaining=55), "+", step=10)
+def test_adjust_up_grows_total_when_exceeding():
+    s = adjust(make(60, remaining=55), 10)
     assert s.remaining == 65
     assert s.total_seconds == 65
     assert s.fraction == 1.0
 
 
-@pytest.mark.parametrize("key", ["-", "_"])
-def test_subtract_reduces_remaining(key):
-    s = apply_key(make(60, remaining=20), key, step=10)
+def test_adjust_down_reduces_remaining():
+    s = adjust(make(60, remaining=20), -10)
     assert s.remaining == 10
+    assert s.total_seconds == 60  # denominator untouched when shrinking
 
 
-def test_subtract_clamps_at_zero():
-    s = apply_key(make(60, remaining=5), "-", step=10)
+def test_adjust_down_clamps_at_zero():
+    s = adjust(make(60, remaining=5), -10)
     assert s.remaining == 0
 
 
-def test_add_resurrects_finished_timer():
-    s = apply_key(make(60, remaining=0), "+", step=10)
+def test_adjust_up_resurrects_finished_timer():
+    s = adjust(make(60, remaining=0), 10)
     assert s.finished is False
     assert s.remaining == 10
 
 
-def test_unknown_key_is_noop():
-    s = make(60)
-    assert apply_key(s, "x") is s
+def test_sw_reset_zeros_and_stops():
+    assert sw_reset(Stopwatch(elapsed=42.0, running=True)) == Stopwatch()
+
+
+def test_focus_next_cycles_in_order():
+    v = View()  # TIMER by default
+    assert v.active is FOCUS_ORDER[0]
+    seen = [v.active]
+    for _ in range(len(FOCUS_ORDER) - 1):
+        v = focus_next(v)
+        seen.append(v.active)
+    assert seen == list(FOCUS_ORDER)
+
+
+def test_focus_next_wraps_around():
+    v = View(active=FOCUS_ORDER[-1])
+    assert focus_next(v).active is FOCUS_ORDER[0]
+
+
+def test_focus_prev_wraps_around():
+    v = View(active=FOCUS_ORDER[0])
+    assert focus_prev(v).active is FOCUS_ORDER[-1]
+
+
+def test_focus_next_prev_round_trip():
+    v = View(active=Section.STOPWATCH)
+    assert focus_prev(focus_next(v)) == v
 
 
 def test_with_now_updates_only_clock():

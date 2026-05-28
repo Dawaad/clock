@@ -32,17 +32,12 @@ from pathlib import Path
 from typing import Mapping
 
 from . import theme
+from .keys import DEFAULT_KEYBINDS
 from .theme import RGB
 
-# Action -> default Textual key names. Actions are the stable contract that the
-# app dispatches on; users remap which keys trigger them.
-DEFAULT_KEYBINDS: dict[str, tuple[str, ...]] = {
-    "pause": ("space", "p"),
-    "adjust_up": ("plus", "equals_sign"),
-    "adjust_down": ("minus", "underscore"),
-    "set_timer": ("e",),
-    "quit": ("q",),
-}
+# DEFAULT_KEYBINDS (action name -> default Textual keys) is the stable contract
+# the app dispatches on; it is sourced from clock.keys.REGISTRY so keys have a
+# single definition. Users remap which keys trigger each action.
 
 
 class ConfigError(ValueError):

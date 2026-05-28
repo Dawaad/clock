@@ -5,7 +5,7 @@ trivial to unit-test. The app layer owns the real clocks and feeds them in:
 
 - ``advance(state, dt)`` moves the countdown by a monotonic delta.
 - ``with_now(state, now)`` stamps the current wall time (used by the header).
-- ``apply_key(state, key)`` handles pause / adjust controls.
+- ``toggle_pause(state)`` / ``adjust(state, delta)`` are the timer controls.
 """
 
 from __future__ import annotations
@@ -13,11 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-# Arrow keys are reserved for orbiting the camera (see clock.view), so timer
-# adjustment uses the +/- pair only.
-PAUSE_KEYS = frozenset({" ", "p"})
-ADD_KEYS = frozenset({"+", "="})
-SUB_KEYS = frozenset({"-", "_"})
+from .keys import FOCUS_ORDER, Section
 
 DEFAULT_STEP = 10
 
@@ -84,17 +80,47 @@ def sw_tick(sw: Stopwatch, dt: float) -> Stopwatch:
     return replace(sw, elapsed=sw.elapsed + dt)
 
 
-def apply_key(state: TimerState, key: str, step: int = DEFAULT_STEP) -> TimerState:
-    """Apply a control key. Unknown keys leave the state unchanged."""
-    if key in PAUSE_KEYS:
-        return replace(state, paused=not state.paused)
-    if key in ADD_KEYS:
-        remaining = state.remaining + step
-        return replace(
-            state,
-            remaining=remaining,
-            total_seconds=max(state.total_seconds, int(round(remaining))),
-        )
-    if key in SUB_KEYS:
-        return replace(state, remaining=max(0.0, state.remaining - step))
-    return state
+def sw_reset(sw: Stopwatch) -> Stopwatch:
+    """Stop and zero the stopwatch."""
+    return Stopwatch()
+
+
+def toggle_pause(state: TimerState) -> TimerState:
+    return replace(state, paused=not state.paused)
+
+
+def adjust(state: TimerState, delta: float) -> TimerState:
+    """Add ``delta`` seconds to the remaining time (clamped at zero).
+
+    A positive adjustment also grows ``total_seconds`` so the progress fraction
+    never exceeds 1; a negative one leaves the denominator untouched.
+    """
+    remaining = max(0.0, state.remaining + delta)
+    total = max(state.total_seconds, int(round(remaining)))
+    return replace(state, remaining=remaining, total_seconds=total)
+
+
+@dataclass(frozen=True)
+class View:
+    """Which section currently has focus (the one key context acts on)."""
+
+    active: Section = Section.TIMER
+
+
+@dataclass(frozen=True)
+class Editor:
+    """Inline duration entry shown in the TIMER section (replaces the modal)."""
+
+    active: bool = False
+    buffer: str = ""
+    error: str | None = None
+
+
+def focus_next(view: View) -> View:
+    i = FOCUS_ORDER.index(view.active)
+    return replace(view, active=FOCUS_ORDER[(i + 1) % len(FOCUS_ORDER)])
+
+
+def focus_prev(view: View) -> View:
+    i = FOCUS_ORDER.index(view.active)
+    return replace(view, active=FOCUS_ORDER[(i - 1) % len(FOCUS_ORDER)])
