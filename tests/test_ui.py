@@ -2,7 +2,7 @@ import re
 from dataclasses import replace
 from datetime import datetime
 
-from clock.state import new_timer
+from clock.state import Stopwatch, new_timer
 from clock.ui import render
 
 T0 = datetime(2026, 5, 28, 14, 33, 0)
@@ -30,10 +30,17 @@ def test_too_small_message():
     assert "WINDOW TOO SMALL" in strip(render(state(), (20, 8)))
 
 
-def test_all_four_quadrant_headers_present():
+def test_all_quadrant_headers_present():
     out = strip(render(state(), (110, 40)))
-    for header in ("T I M E R", "K E Y B I N D S", "C L O C K", "T I M E"):
+    for header in ("T I M E R", "K E Y B I N D S", "C L O C K", "T I M E", "S T O P W A T C H"):
         assert header in out
+
+
+def test_stopwatch_status_reflects_running():
+    running = strip(render(state(), (110, 40), Stopwatch(elapsed=1.0, running=True)))
+    assert "RUNNING" in running
+    ready = strip(render(state(), (110, 40), Stopwatch()))
+    assert "READY" in ready
 
 
 def test_keybinds_listed():
@@ -41,6 +48,13 @@ def test_keybinds_listed():
     assert "pause / resume" in out
     assert "adjust 10s" in out
     assert "quit" in out
+
+
+def test_clear_bind_shown_only_with_active_timer():
+    active = strip(render(state(total=300), (110, 40)))
+    assert "clear" in active
+    blank = strip(render(state(total=0, remaining=0), (110, 40)))
+    assert "clear" not in blank
 
 
 def test_wall_time_and_date_shown():
@@ -69,8 +83,9 @@ def test_is_deterministic():
     assert render(s, size) == render(s, size)
 
 
-def test_renders_on_small_screen_without_error():
-    out = render(state(total=190, remaining=90), (80, 20))
+def test_renders_on_short_screen_without_error():
+    # Grid width but a short viewport: panels degrade but must not error.
+    out = render(state(total=190, remaining=90), (96, 20))
     assert len(out.split("\n")) == 20
     assert "ELAPSED" in strip(out)
 

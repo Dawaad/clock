@@ -64,6 +64,26 @@ def with_now(state: TimerState, now: datetime) -> TimerState:
     return replace(state, now=now)
 
 
+@dataclass(frozen=True)
+class Stopwatch:
+    """A count-up timer, independent of the countdown."""
+
+    elapsed: float = 0.0
+    running: bool = False
+
+
+def sw_toggle(sw: Stopwatch) -> Stopwatch:
+    """Start, pause, or resume the stopwatch."""
+    return replace(sw, running=not sw.running)
+
+
+def sw_tick(sw: Stopwatch, dt: float) -> Stopwatch:
+    """Add ``dt`` seconds of real time while running."""
+    if not sw.running or dt <= 0:
+        return sw
+    return replace(sw, elapsed=sw.elapsed + dt)
+
+
 def apply_key(state: TimerState, key: str, step: int = DEFAULT_STEP) -> TimerState:
     """Apply a control key. Unknown keys leave the state unchanged."""
     if key in PAUSE_KEYS:
