@@ -1,20 +1,15 @@
-"""A small z-buffered cell frame with foreground + background truecolor.
+"""A flat cell frame with per-cell foreground + background truecolor.
 
-Each cell holds a char, an fg colour, a bg colour and a depth. Surfaces are
-written with a depth test (nearest wins); overlays (text, line art) are written
-on top but still respect occlusion via the depth they pass in. ``emit``
-coalesces runs of identical (fg, bg) to keep the escape stream small.
+Each cell holds a char, an fg colour and a bg colour. ``emit`` coalesces runs of
+identical (fg, bg) so the escape stream stays small.
 """
 
 from __future__ import annotations
 
-import math
+from .theme import BG, INK, RGB
 
-from .theme import RGB
-
-DEFAULT_FG: RGB = (230, 230, 232)
-DEFAULT_BG: RGB = (18, 18, 20)
-_EPS = 1e-6
+DEFAULT_FG: RGB = INK
+DEFAULT_BG: RGB = BG
 
 
 class Frame:
@@ -23,47 +18,31 @@ class Frame:
         self.char = [[" "] * cols for _ in range(rows)]
         self.fg: list[list[RGB | None]] = [[None] * cols for _ in range(rows)]
         self.bg: list[list[RGB | None]] = [[None] * cols for _ in range(rows)]
-        self.z = [[math.inf] * cols for _ in range(rows)]
 
     def _in(self, x: int, y: int) -> bool:
         return 0 <= x < self.cols and 0 <= y < self.rows
 
     def set_bg(self, x: int, y: int, color: RGB) -> None:
-        """Unconditional background paint (used for the backdrop)."""
         if self._in(x, y):
             self.bg[y][x] = color
 
-    def surface(
-        self,
-        x: int,
-        y: int,
-        depth: float,
-        *,
-        bg: RGB | None = None,
-        fg: RGB | None = None,
-        char: str | None = None,
-    ) -> None:
-        """Depth-tested surface write (nearest wins)."""
-        if not self._in(x, y) or depth > self.z[y][x] + _EPS:
-            return
-        self.z[y][x] = depth
-        if bg is not None:
-            self.bg[y][x] = bg
-        if fg is not None:
-            self.fg[y][x] = fg
-        if char is not None:
-            self.char[y][x] = char
+    def fill_bg(self, color: RGB) -> None:
+        for y in range(self.rows):
+            row = self.bg[y]
+            for x in range(self.cols):
+                row[x] = color
 
-    def overlay(self, x: int, y: int, depth: float, char: str, fg: RGB) -> None:
-        """Draw a glyph on top of a surface, respecting occlusion.
-
-        Passes if the overlay is no farther than what already occupies the
-        cell, so UI on the face is hidden where a nearer rim covers it.
-        """
-        if not self._in(x, y) or depth > self.z[y][x] + 0.5:
+    def put(self, x: int, y: int, char: str, fg: RGB, bg: RGB | None = None) -> None:
+        if not self._in(x, y):
             return
         self.char[y][x] = char
         self.fg[y][x] = fg
+        if bg is not None:
+            self.bg[y][x] = bg
+
+    def text(self, x: int, y: int, s: str, fg: RGB) -> None:
+        for i, ch in enumerate(s):
+            self.put(x + i, y, ch, fg)
 
     def emit(self) -> str:
         out: list[str] = []

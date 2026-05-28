@@ -1,12 +1,23 @@
-# clock — terminal countdown timer
+# clock — four-panel terminal countdown timer
 
-A `clock <duration>` CLI that renders a high-fidelity animated countdown in the
-terminal: a gradient circular ring (red→orange→yellow) with radial tick dots, a
-vertical tick scale, a large remaining-time readout, a header showing the
-current wall time and date, an elapsed line, and live controls.
+A `clock <duration>` CLI rendering a flat, editorial four-quadrant panel
+(cream paper / dark ink), in a bordered box split 2×2:
 
-Reference starting point: `~/Downloads/ringtimer.py` (braille dot-canvas
-renderer). This plan extends it toward the image-3 dial aesthetic.
+- **Top-left — TIMER:** big remaining readout + a horizontal "equalizer"
+  progress bar that fills with elapsed time, plus a RUNNING/PAUSED status.
+- **Top-right — KEYBINDS:** the available controls.
+- **Bottom-left — CLOCK:** a circular braille progress ring (remaining) with a
+  dial pointer and a percentage.
+- **Bottom-right — TIME:** real-world wall time, year, weekday and date.
+
+Rendered with a small flat cell buffer (`raster.Frame`) plus a tiny braille
+canvas (`braille`) for the ring. No external rendering deps beyond Textual.
+
+The prior 3D radio-dial design was fully scrapped for this layout.
+
+## Controls
+
+`space`/`p` pause · `+`/`-` adjust ±10s · `q` quit
 
 ## Usage
 
@@ -47,37 +58,23 @@ Controls: `space`/`p` pause, `+`/`-` adjust ±10s, `q` quit.
 ```
 clock/
   __init__.py
-  cli.py          # arg parsing, entry point
-  parse.py        # parse_duration() + format_hms()
-  theme.py        # colors, constants, Layout dataclass (derived from size)
-  canvas.py       # Canvas + draw_arc/tick_marks primitives + coalesced emit
-  state.py        # TimerState dataclass + apply_key reducer + clock source
-  render.py       # pure render(state, size) -> str (cached static layers)
-  app.py          # Textual App + custom widget, ~10fps, key bindings
-tests/
-  test_parse.py
-  test_render.py
-  test_state.py
-  test_app.py     # Textual Pilot smoke
+  cli.py          # arg parsing, entry point (console_script `clock`)
+  parse.py        # parse_duration() + format_readout/format_hms
+  font.py         # bitmap font for the big readouts
+  theme.py        # flat cream/ink palette
+  state.py        # TimerState + advance/apply_key/with_now (injected clock)
+  raster.py       # flat Frame (char/fg/bg) + coalesced ANSI emit
+  braille.py      # tiny braille Canvas for the clock ring
+  ui.py           # render(state, size) -> str  (four-quadrant panel)
+  app.py          # Textual App: clocks, keys, ~10fps refresh
+tests/            # parse, state, raster, ui, app, cli
+tools/preview.py  # dev: rasterize a frame to PNG for visual review
 pyproject.toml
 ```
 
-## Render composition (image-3 fidelity)
+## Adaptive layout
 
-- Circular gradient ring (clockwise arc = fraction remaining) + radial tick dots.
-- Vertical tick scale (right rail) with a moving progress indicator.
-- Big remaining-time number (hh:mm:ss / mm:ss / seconds), centered.
-- Header: current wall time + date.
-- Elapsed line (REC-style indicator).
-- Bottom control hint.
-
-## Build order
-
-1. Scaffold package + pyproject (Textual dep).
-2. `parse.py` + exhaustive parser tests (9A).
-3. `state.py` (TimerState, apply_key reducer, injected clock) + tests (11A/12A).
-4. `theme.py` + `canvas.py` (primitives, coalesced emit) (6A/8A/16A).
-5. `render.py` (pure, cached static layers) + structural/golden tests (10A/13A).
-6. `app.py` (Textual app, widget, bindings, fps) + Pilot smoke (11A/14A).
-7. `cli.py` entry point wiring (4A/7A).
-8. Manual run-through; install verification.
+Each quadrant's big readout uses the block font when it fits its quadrant, and
+falls back to plain text (vertically centred) on short/narrow screens, so the
+timer and time stay legible down to ~40×16. Below the minimum a centred
+"WINDOW TOO SMALL" message is shown.

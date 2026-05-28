@@ -1,8 +1,8 @@
 """Textual application: drives the clocks, input, and frame refresh.
 
-All timer logic lives in :mod:`clock.state` and all drawing in
-:mod:`clock.render`; this layer only wires real clocks and key events to those
-pure pieces, so it stays thin and the logic stays unit-testable.
+Timer logic lives in :mod:`clock.state` and all drawing in :mod:`clock.ui`; this
+layer only wires real clocks and key events to those pure pieces, so it stays
+thin and the logic stays unit-testable.
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
-from .render import render
 from .state import advance, apply_key, new_timer, with_now
+from .ui import render
 
-# Textual key names -> reducer key tokens.
+# Textual key names -> timer reducer key tokens.
 _KEY_MAP = {
     "space": " ",
     "p": "p",
@@ -27,8 +27,6 @@ _KEY_MAP = {
     "equals_sign": "=",
     "minus": "-",
     "underscore": "_",
-    "up": "up",
-    "down": "down",
 }
 
 DEFAULT_FPS = 10
@@ -81,10 +79,11 @@ class ClockApp(App):
         self.set_timer(FINISH_LINGER, self.exit)
 
     def on_key(self, event) -> None:
-        if event.key == "q":
+        key = event.key
+        if key == "q":
             self.exit()
             return
-        token = _KEY_MAP.get(event.key)
+        token = _KEY_MAP.get(key)
         if token is not None:
             self.state = apply_key(self.state, token)
             self._draw()
