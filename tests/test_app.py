@@ -125,6 +125,20 @@ async def test_cancel_picker_with_no_timer_exits():
 
 
 @pytest.mark.asyncio
+async def test_picker_backdrop_matches_theme():
+    from textual.color import Color
+    from clock.config import BUILTIN_THEMES
+
+    cfg = Config(colors=BUILTIN_THEMES["dark"])
+    app = ClockApp(None, config=cfg, monotonic=lambda: 1000.0, wallclock=lambda: T0, fps=60)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, DurationModal)
+        # The modal screen's own backdrop must follow the palette, not default.
+        assert app.screen.styles.background == Color(*cfg.colors.bg)
+
+
+@pytest.mark.asyncio
 async def test_e_key_opens_picker():
     app = make_app()
     async with app.run_test() as pilot:
