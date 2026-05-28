@@ -70,6 +70,24 @@ def test_is_deterministic():
 
 
 def test_renders_on_small_screen_without_error():
-    out = render(state(total=190, remaining=90), (56, 20))
+    out = render(state(total=190, remaining=90), (80, 20))
     assert len(out.split("\n")) == 20
     assert "ELAPSED" in strip(out)
+
+
+def test_is_narrow_threshold():
+    from clock.ui import NARROW_W, is_narrow
+
+    assert is_narrow(NARROW_W - 1)
+    assert not is_narrow(NARROW_W)
+
+
+def test_stacked_layout_when_narrow():
+    from clock.ui import STACK_MIN_H
+
+    out = render(state(), (48, STACK_MIN_H))
+    plain = strip(out)
+    for header in ("T I M E R", "K E Y B I N D S", "C L O C K", "T I M E"):
+        assert header in plain
+    assert "ELAPSED" in plain
+    assert len(out.split("\n")) == STACK_MIN_H

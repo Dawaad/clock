@@ -13,11 +13,14 @@ from typing import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
 from .state import advance, apply_key, new_timer, with_now
-from .ui import render
+from .ui import STACK_MIN_H, is_narrow, render
+
+_SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
 
 # Textual key names -> timer reducer key tokens.
 _KEY_MAP = {
@@ -36,8 +39,9 @@ FINISH_LINGER = 2.0
 
 class ClockApp(App):
     CSS = """
-    Screen { background: $background; }
-    #frame { width: 100%; height: 100%; }
+    Screen { background: rgb(237,234,226); }
+    #scroll { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; }
+    #frame { width: auto; height: auto; }
     """
 
     def __init__(
@@ -57,7 +61,8 @@ class ClockApp(App):
         self.state = new_timer(total_seconds, wallclock())
 
     def compose(self) -> ComposeResult:
-        yield Static(id="frame")
+        with VerticalScroll(id="scroll"):
+            yield Static(id="frame")
 
     def on_mount(self) -> None:
         self._last = self._monotonic()
@@ -83,6 +88,9 @@ class ClockApp(App):
         if key == "q":
             self.exit()
             return
+        if key in _SCROLL_KEYS:
+            self._scroll(key)
+            return
         token = _KEY_MAP.get(key)
         if token is not None:
             self.state = apply_key(self.state, token)
@@ -90,6 +98,24 @@ class ClockApp(App):
 
     def on_resize(self, event) -> None:
         self._draw()
+
+    def _scroll(self, key: str) -> None:
+        try:
+            sc = self.query_one("#scroll", VerticalScroll)
+        except NoMatches:
+            return
+        if key == "up":
+            sc.scroll_up()
+        elif key == "down":
+            sc.scroll_down()
+        elif key == "pageup":
+            sc.scroll_page_up()
+        elif key == "pagedown":
+            sc.scroll_page_down()
+        elif key == "home":
+            sc.scroll_home()
+        elif key == "end":
+            sc.scroll_end()
 
     def _draw(self) -> None:
         # A scheduled interval tick can fire during teardown, after the widget
@@ -100,8 +126,13 @@ class ClockApp(App):
             frame_widget = self.query_one("#frame", Static)
         except NoMatches:
             return
-        size = self.size
-        frame = render(self.state, (size.width, size.height))
+        w, vh = self.size.width, self.size.height
+        if is_narrow(w) and STACK_MIN_H > vh:
+            # Stacked content is taller than the viewport: render its full height
+            # (less one column for the scrollbar) so the container can scroll it.
+            frame = render(self.state, (w - 1, STACK_MIN_H))
+        else:
+            frame = render(self.state, (w, vh))
         frame_widget.update(Text.from_ansi(frame))
 
 

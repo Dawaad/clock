@@ -34,6 +34,21 @@ KEYBINDS = [
 ]
 
 
+# Below this width the 2x2 grid collapses to a single scrollable column.
+NARROW_W = 64
+# Stacked band heights (the clock band flexes to fill remaining space).
+STACK_TIMER_H = 11
+STACK_KEY_H = 8
+STACK_TIME_H = 11
+STACK_CLOCK_MIN = 10
+# Minimum total height of the stacked layout (clock at its minimum).
+STACK_MIN_H = 1 + STACK_TIMER_H + 1 + STACK_KEY_H + 1 + STACK_CLOCK_MIN + 1 + STACK_TIME_H + 1
+
+
+def is_narrow(cols: int) -> bool:
+    return cols < NARROW_W
+
+
 def render(state: TimerState, size: tuple[int, int]) -> str:
     cols, rows = size
     if cols < theme.MIN_COLS or rows < theme.MIN_ROWS:
@@ -41,7 +56,14 @@ def render(state: TimerState, size: tuple[int, int]) -> str:
 
     f = Frame(cols, rows)
     f.fill_bg(theme.BG)
+    if is_narrow(cols):
+        _render_stacked(f, state, cols, rows)
+    else:
+        _render_grid(f, state, cols, rows)
+    return f.emit()
 
+
+def _render_grid(f, state, cols, rows) -> None:
     x0, y0, x1, y1 = 1, 1, cols - 2, rows - 2
     span_x = x1 - x0
     # Asymmetric columns matching the reference: top-left & bottom-right are the
@@ -55,7 +77,40 @@ def render(state: TimerState, size: tuple[int, int]) -> str:
     _keybinds_quadrant(f, top_split + 2, y0 + 1, x1 - 2, midy - 1)
     _clock_quadrant(f, state, x0 + 2, midy + 1, bot_split - 2, y1 - 1, cols, rows)
     _time_quadrant(f, state, bot_split + 2, midy + 1, x1 - 2, y1 - 1)
-    return f.emit()
+
+
+def _render_stacked(f, state, cols, rows) -> None:
+    """Single-column layout: panels stacked, clock flexes to fill height.
+
+    Rendered into ``rows`` (which the app sets to at least STACK_MIN_H), so when
+    the viewport is shorter the app scrolls this taller frame.
+    """
+    x0, y0, x1, y1 = 1, 1, cols - 2, rows - 2
+    _outer_box(f, x0, y0, x1, y1)
+
+    timer_top = y0 + 1
+    timer_bot = timer_top + STACK_TIMER_H - 1
+    sep1 = timer_bot + 1
+    key_top = sep1 + 1
+    key_bot = key_top + STACK_KEY_H - 1
+    sep2 = key_bot + 1
+    time_bot = y1 - 1
+    time_top = time_bot - STACK_TIME_H + 1
+    sep3 = time_top - 1
+    clock_top = sep2 + 1
+    clock_bot = sep3 - 1
+
+    for sep in (sep1, sep2, sep3):
+        for x in range(x0, x1 + 1):
+            f.put(x, sep, "─", theme.FAINT)
+        f.put(x0, sep, "├", theme.FAINT)
+        f.put(x1, sep, "┤", theme.FAINT)
+
+    ix0, ix1 = x0 + 2, x1 - 2
+    _timer_quadrant(f, state, ix0, timer_top, ix1, timer_bot)
+    _keybinds_quadrant(f, ix0, key_top, ix1, key_bot)
+    _clock_quadrant(f, state, ix0, clock_top, ix1, clock_bot, cols, rows)
+    _time_quadrant(f, state, ix0, time_top, ix1, time_bot)
 
 
 # --------------------------------------------------------------------------- #
@@ -167,6 +222,20 @@ def _frame_box(f, x0, y0, x1, y1, top_split, bot_split, midy) -> None:
     f.put(top_split, midy, "┼" if top_split == bot_split else "┴", c)
     if bot_split != top_split:
         f.put(bot_split, midy, "┬", c)
+
+
+def _outer_box(f, x0, y0, x1, y1) -> None:
+    c = theme.FAINT
+    for x in range(x0, x1 + 1):
+        f.put(x, y0, "─", c)
+        f.put(x, y1, "─", c)
+    for y in range(y0, y1 + 1):
+        f.put(x0, y, "│", c)
+        f.put(x1, y, "│", c)
+    f.put(x0, y0, "┌", c)
+    f.put(x1, y0, "┐", c)
+    f.put(x0, y1, "└", c)
+    f.put(x1, y1, "┘", c)
 
 
 def _header(f, x, y, text) -> None:

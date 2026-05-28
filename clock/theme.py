@@ -11,5 +11,5 @@ FAINT: RGB = (203, 200, 192)    # borders, tracks, unfilled bars
 ACCENT: RGB = (198, 72, 56)     # muted red status accent
 
 # Minimum terminal size before the "too small" message.
-MIN_COLS = 40
-MIN_ROWS = 16
+MIN_COLS = 24
+MIN_ROWS = 10

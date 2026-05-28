@@ -72,9 +72,17 @@ tools/preview.py  # dev: rasterize a frame to PNG for visual review
 pyproject.toml
 ```
 
-## Adaptive layout
+## Adaptive / responsive layout
 
-Each quadrant's big readout uses the block font when it fits its quadrant, and
-falls back to plain text (vertically centred) on short/narrow screens, so the
-timer and time stay legible down to ~40×16. Below the minimum a centred
-"WINDOW TOO SMALL" message is shown.
+The renderer is fully size-driven and recomputes on every frame (Textual
+`on_resize` triggers a redraw):
+
+- **Wide (≥ 64 cols):** the 2×2 grid with asymmetric columns — top-left timer
+  and bottom-right time are the wide panels; top-right keybinds and bottom-left
+  clock are narrower (matching the reference).
+- **Narrow (< 64 cols):** the grid collapses to a single stacked column
+  (timer → keybinds → clock → time). When the stack is taller than the viewport
+  it is rendered at full height inside a `VerticalScroll`; arrows / PageUp-Down /
+  Home / End scroll it. The clock band flexes to fill any spare height.
+- Each big readout uses the block font when it fits, else plain text.
+- Below ~24×10 a centred "WINDOW TOO SMALL" message is shown.

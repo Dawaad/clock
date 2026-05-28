@@ -40,6 +40,27 @@ async def test_adjust_keys_change_remaining():
 
 
 @pytest.mark.asyncio
+async def test_narrow_viewport_is_scrollable():
+    # A narrow, short viewport stacks taller than the screen and must scroll.
+    app = make_app()
+    async with app.run_test(size=(48, 20)) as pilot:
+        await pilot.pause()
+        sc = app.query_one("#scroll")
+        assert sc.max_scroll_y > 0
+        await pilot.press("end")
+        await pilot.pause()
+        assert sc.scroll_offset.y > 0
+
+
+@pytest.mark.asyncio
+async def test_wide_viewport_does_not_scroll():
+    app = make_app()
+    async with app.run_test(size=(110, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#scroll").max_scroll_y == 0
+
+
+@pytest.mark.asyncio
 async def test_quit_exits_app():
     app = make_app()
     async with app.run_test() as pilot:
