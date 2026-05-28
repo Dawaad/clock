@@ -70,6 +70,9 @@ class DurationModal(ModalScreen[int | None]):
         co = self._co
         bg, ink, soft = Color(*co.bg), Color(*co.ink), Color(*co.ink_soft)
         faint, accent = Color(*co.faint), Color(*co.accent)
+        # The modal screen's own backdrop defaults to a light surface; theme it
+        # so the area around the dialog matches the active palette.
+        self.styles.background = bg
         dialog = self.query_one("#dialog")
         dialog.styles.background = bg
         dialog.styles.border = ("round", faint)
