@@ -179,14 +179,10 @@ class ClockApp(App):
         if key in _SCROLL_KEYS:
             self._scroll(key)
             return
-        token = _KEY_MAP.get(key)
         token = _ACTION_TOKENS.get(action)
         if token is not None:
             self.state = apply_key(self.state, token)
             self._draw()
-            return
-        if key in _SCROLL_KEYS:
-            self._scroll(key)
 
     def _open_picker(self) -> None:
         self.push_screen(DurationModal(self._cfg.colors), self._on_duration_chosen)

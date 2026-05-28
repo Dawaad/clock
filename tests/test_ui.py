@@ -94,7 +94,7 @@ def test_custom_colors_change_background():
     from clock.config import Colors
 
     co = Colors(bg=(16, 16, 18))
-    assert "48;2;16;16;18" in render(state(), (110, 40), co)
+    assert "48;2;16;16;18" in render(state(), (110, 40), colors=co)
 
 
 def test_is_narrow_threshold():
