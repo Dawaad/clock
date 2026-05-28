@@ -13,10 +13,12 @@ from typing import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll, Vertical
 from textual.css.query import NoMatches
-from textual.widgets import Static
+from textual.screen import ModalScreen
+from textual.widgets import Input, Label, Static
 
+from .parse import DurationError, parse_duration
 from .state import advance, apply_key, new_timer, with_now
 from .ui import STACK_MIN_H, is_narrow, render
 
@@ -37,6 +39,59 @@ FINISH_BELLS = 4
 FINISH_LINGER = 2.0
 
 
+class DurationModal(ModalScreen[int | None]):
+    """A rofi-style centered prompt for entering a countdown duration.
+
+    Dismisses with the parsed seconds on submit, or ``None`` on cancel.
+    """
+
+    CSS = """
+    DurationModal { align: center middle; }
+    #dialog {
+        width: 56; height: auto;
+        background: rgb(237,234,226);
+        border: round rgb(203,200,192);
+        padding: 1 2;
+    }
+    #prompt { height: 3; }
+    #chip {
+        background: rgb(198,72,56); color: rgb(237,234,226);
+        padding: 0 1; margin: 1 2 0 0; text-style: bold;
+    }
+    #dur {
+        background: rgb(237,234,226); color: rgb(30,30,32);
+        border: tall rgb(203,200,192); height: 3;
+    }
+    #dur:focus { border: tall rgb(198,72,56); }
+    #error { color: rgb(198,72,56); height: 1; }
+    #hint { color: rgb(138,136,130); height: 1; }
+    """
+
+    BINDINGS = [("escape", "cancel", "cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            with Horizontal(id="prompt"):
+                yield Label("TIMER", id="chip")
+                yield Input(placeholder="e.g. 5m, 30:00, 90s, 1h30m", id="dur")
+            yield Label("", id="error")
+            yield Label("[enter] start    [esc] cancel", id="hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#dur", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        try:
+            total = parse_duration(event.value)
+        except DurationError as exc:
+            self.query_one("#error", Label).update(str(exc))
+            return
+        self.dismiss(total)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ClockApp(App):
     CSS = """
     Screen { background: rgb(237,234,226); }
@@ -46,7 +101,7 @@ class ClockApp(App):
 
     def __init__(
         self,
-        total_seconds: int,
+        total_seconds: int | None,
         *,
         monotonic: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], datetime] = datetime.now,
@@ -58,7 +113,8 @@ class ClockApp(App):
         self._fps = fps
         self._last = 0.0
         self._alerted = False
-        self.state = new_timer(total_seconds, wallclock())
+        self._configured = total_seconds is not None
+        self.state = new_timer(total_seconds or 0, wallclock())
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="scroll"):
@@ -68,10 +124,18 @@ class ClockApp(App):
         self._last = self._monotonic()
         self.set_interval(1 / self._fps, self._tick)
         self._draw()
+        if not self._configured:
+            self._open_picker()
 
     def _tick(self) -> None:
         now = self._monotonic()
         dt, self._last = now - self._last, now
+        if not self._configured:
+            # No duration chosen yet: keep the wall clock live but hold the
+            # countdown so it neither advances nor fires the finish alert.
+            self.state = with_now(self.state, self._wallclock())
+            self._draw()
+            return
         self.state = with_now(advance(self.state, dt), self._wallclock())
         if self.state.finished and not self._alerted:
             self._on_finished()
@@ -88,6 +152,9 @@ class ClockApp(App):
         if key == "q":
             self.exit()
             return
+        if key == "e":
+            self._open_picker()
+            return
         if key in _SCROLL_KEYS:
             self._scroll(key)
             return
@@ -95,6 +162,21 @@ class ClockApp(App):
         if token is not None:
             self.state = apply_key(self.state, token)
             self._draw()
+
+    def _open_picker(self) -> None:
+        self.push_screen(DurationModal(), self._on_duration_chosen)
+
+    def _on_duration_chosen(self, total: int | None) -> None:
+        if total is None:
+            # Cancelled with no timer ever set: nothing to show, so quit.
+            if not self._configured:
+                self.exit()
+            return
+        self.state = new_timer(total, self._wallclock())
+        self._configured = True
+        self._alerted = False
+        self._last = self._monotonic()
+        self._draw()
 
     def on_resize(self, event) -> None:
         self._draw()
@@ -136,5 +218,5 @@ class ClockApp(App):
         frame_widget.update(Text.from_ansi(frame))
 
 
-def run(total_seconds: int) -> None:
+def run(total_seconds: int | None) -> None:
     ClockApp(total_seconds).run()

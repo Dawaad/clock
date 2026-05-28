@@ -24,7 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "duration",
-        help="how long to count down (seconds, unit suffixes, or mm:ss / h:mm:ss)",
+        nargs="?",
+        help="how long to count down (seconds, unit suffixes, or mm:ss / h:mm:ss); "
+        "omit to pick a duration in an interactive prompt",
     )
     parser.add_argument("--version", action="version", version=f"clock {__version__}")
     return parser
@@ -34,10 +36,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    try:
-        total = parse_duration(args.duration)
-    except DurationError as exc:
-        parser.error(str(exc))  # prints usage + message, exits 2
+    total: int | None = None
+    if args.duration is not None:
+        try:
+            total = parse_duration(args.duration)
+        except DurationError as exc:
+            parser.error(str(exc))  # prints usage + message, exits 2
 
     if not sys.stdout.isatty():
         print("clock: requires an interactive terminal", file=sys.stderr)

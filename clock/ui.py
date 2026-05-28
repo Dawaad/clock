@@ -30,6 +30,7 @@ EIGHTHS = "▁▂▃▄▅▆▇█"
 KEYBINDS = [
     ("space", "pause / resume", "pause"),
     ("+  /  -", "adjust 10s", "+-10s"),
+    ("e", "set timer", "set"),
     ("q", "quit", "quit"),
 ]
 
@@ -38,7 +39,7 @@ KEYBINDS = [
 NARROW_W = 64
 # Stacked band heights (the clock band flexes to fill remaining space).
 STACK_TIMER_H = 11
-STACK_KEY_H = 8
+STACK_KEY_H = 10
 STACK_TIME_H = 11
 STACK_CLOCK_MIN = 10
 # Minimum total height of the stacked layout (clock at its minimum).

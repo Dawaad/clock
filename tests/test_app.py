@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from clock.app import ClockApp
+from clock.app import ClockApp, DurationModal
 
 T0 = datetime(2026, 5, 28, 14, 33, 0)
 
@@ -76,6 +76,59 @@ async def test_tick_after_teardown_is_safe():
     async with app.run_test() as pilot:
         await pilot.pause()
     app._tick()  # post-teardown; should be a no-op, not raise
+
+
+def make_unconfigured(monotonic_value=1000.0):
+    return ClockApp(
+        None,
+        monotonic=lambda: monotonic_value,
+        wallclock=lambda: T0,
+        fps=60,
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_duration_opens_picker_and_sets_timer():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, DurationModal)
+        await pilot.press("5", "m", "enter")
+        await pilot.pause()
+        assert app._configured
+        assert app.state.total_seconds == 300
+        assert not isinstance(app.screen, DurationModal)
+
+
+@pytest.mark.asyncio
+async def test_cancel_picker_with_no_timer_exits():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.return_code is not None
+
+
+@pytest.mark.asyncio
+async def test_e_key_opens_picker():
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, DurationModal)
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_timer_does_not_advance_or_finish():
+    clock = {"t": 1000.0}
+    app = ClockApp(None, monotonic=lambda: clock["t"], wallclock=lambda: T0, fps=60)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        clock["t"] = 2000.0  # lots of real time passes while picker is open
+        await pilot.pause()
+        assert app._alerted is False
+        assert app.state.remaining == 0  # held, never went "finished"
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,16 @@
 import pytest
 
-from clock.cli import main
+from clock.cli import _build_parser, main
 
 
-def test_missing_argument_errors():
-    with pytest.raises(SystemExit) as exc:
-        main([])
-    assert exc.value.code == 2
+def test_duration_argument_is_optional():
+    # Omitting the duration is allowed; the app then prompts for one.
+    assert _build_parser().parse_args([]).duration is None
+
+
+def test_missing_argument_does_not_error():
+    # No duration is no longer a usage error; non-tty refusal returns 1 instead.
+    assert main([]) == 1
 
 
 def test_invalid_duration_errors():
