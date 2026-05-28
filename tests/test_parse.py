@@ -69,22 +69,23 @@ def test_none_raises():
 
 
 @pytest.mark.parametrize(
-    "remaining,expected",
+    "seconds,expected",
     [
-        (0, "0"),
-        (5.0, "5"),
-        (5.2, "6"),     # ceil
-        (59, "59"),
-        (60, "1:00"),
-        (90, "1:30"),
-        (599, "9:59"),
-        (3600, "1:00:00"),
-        (3661, "1:01:01"),
-        (36000, "10:00:00"),
+        (0, "0:00.0"),
+        (1.0, "0:01.0"),
+        (5.5, "0:05.5"),
+        (4.999, "0:04.9"),  # floored tenths
+        (59, "0:59.0"),
+        (60, "1:00.0"),
+        (90, "1:30.0"),
+        (599, "9:59.0"),
+        (3600, "1:00:00.0"),
+        (3661, "1:01:01.0"),
+        (36000, "10:00:00.0"),
     ],
 )
-def test_format_readout(remaining, expected):
-    assert format_readout(remaining) == expected
+def test_format_readout(seconds, expected):
+    assert format_readout(seconds) == expected
 
 
 @pytest.mark.parametrize(

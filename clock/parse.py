@@ -80,16 +80,18 @@ def _parse_units(raw: str) -> float:
     return sum(float(value) * _UNIT_SECONDS[unit] for value, unit in matches)
 
 
-def format_readout(remaining: float) -> str:
-    """Adaptive big readout: seconds, m:ss, or h:mm:ss."""
-    secs = max(0, int(math.ceil(remaining - 1e-9)))
-    h, rem = divmod(secs, 3600)
+def format_readout(seconds: float) -> str:
+    """Big readout, always to tenths: ``m:ss.d`` (or ``h:mm:ss.d`` past an hour).
+
+    Tenths are floored so a live count reads naturally (5.0 -> 4.9 -> ...).
+    """
+    tenths = max(0, int(seconds * 10 + 1e-9))
+    whole, t = divmod(tenths, 10)
+    h, rem = divmod(whole, 3600)
     m, s = divmod(rem, 60)
     if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    if secs >= 60:
-        return f"{m}:{s:02d}"
-    return str(s)
+        return f"{h}:{m:02d}:{s:02d}.{t}"
+    return f"{m}:{s:02d}.{t}"
 
 
 def format_hms(seconds: float) -> str:

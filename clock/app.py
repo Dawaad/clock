@@ -21,7 +21,7 @@ from textual.widgets import Input, Label, Static
 
 from .config import Colors, Config
 from .parse import DurationError, parse_duration
-from .state import advance, apply_key, new_timer, with_now
+from .state import Stopwatch, advance, apply_key, new_timer, sw_tick, sw_toggle, with_now
 from .ui import STACK_MIN_H, is_narrow, render
 
 _SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
@@ -124,6 +124,7 @@ class ClockApp(App):
         self._alerted = False
         self._configured = total_seconds is not None
         self.state = new_timer(total_seconds or 0, wallclock())
+        self.stopwatch = Stopwatch()
         # Flatten {action: keys} into {key: action} for O(1) dispatch on input.
         self._actions = {
             key: action
@@ -140,21 +141,17 @@ class ClockApp(App):
         self._last = self._monotonic()
         self.set_interval(1 / self._fps, self._tick)
         self._draw()
-        if not self._configured:
-            self._open_picker()
 
     def _tick(self) -> None:
         now = self._monotonic()
         dt, self._last = now - self._last, now
-        if not self._configured:
-            # No duration chosen yet: keep the wall clock live but hold the
-            # countdown so it neither advances nor fires the finish alert.
-            self.state = with_now(self.state, self._wallclock())
-            self._draw()
-            return
-        self.state = with_now(advance(self.state, dt), self._wallclock())
-        if self.state.finished and not self._alerted:
-            self._on_finished()
+        # The stopwatch runs independently of whether a countdown is configured.
+        self.stopwatch = sw_tick(self.stopwatch, dt)
+        if self._configured:
+            self.state = advance(self.state, dt)
+            if self.state.finished and not self._alerted:
+                self._on_finished()
+        self.state = with_now(self.state, self._wallclock())
         self._draw()
 
     def _on_finished(self) -> None:
@@ -172,6 +169,17 @@ class ClockApp(App):
         if action == "set_timer":
             self._open_picker()
             return
+        if key == "s":
+            self.stopwatch = sw_toggle(self.stopwatch)
+            self._draw()
+            return
+        if key == "c" and (self._configured or self._stopwatch_active()):
+            self._clear()
+            return
+        if key in _SCROLL_KEYS:
+            self._scroll(key)
+            return
+        token = _KEY_MAP.get(key)
         token = _ACTION_TOKENS.get(action)
         if token is not None:
             self.state = apply_key(self.state, token)
@@ -183,11 +191,19 @@ class ClockApp(App):
     def _open_picker(self) -> None:
         self.push_screen(DurationModal(self._cfg.colors), self._on_duration_chosen)
 
+    def _stopwatch_active(self) -> bool:
+        return self.stopwatch.running or self.stopwatch.elapsed > 0
+
+    def _clear(self) -> None:
+        self.state = new_timer(0, self._wallclock())
+        self._configured = False
+        self._alerted = False
+        self.stopwatch = Stopwatch()
+        self._draw()
+
     def _on_duration_chosen(self, total: int | None) -> None:
         if total is None:
-            # Cancelled with no timer ever set: nothing to show, so quit.
-            if not self._configured:
-                self.exit()
+            # Cancelled: fall back to (or keep) the default blank-timer view.
             return
         self.state = new_timer(total, self._wallclock())
         self._configured = True
@@ -230,9 +246,10 @@ class ClockApp(App):
         if is_narrow(w) and STACK_MIN_H > vh:
             # Stacked content is taller than the viewport: render its full height
             # (less one column for the scrollbar) so the container can scroll it.
-            frame = render(self.state, (w - 1, STACK_MIN_H), co)
+            frame = render(self.state, (w - 1, STACK_MIN_H), self.stopwatch, co)            
         else:
-            frame = render(self.state, (w, vh), co)
+            frame = render(self.state, (w, vh), self.stopwatch, co)
+
         frame_widget.update(Text.from_ansi(frame))
 
 

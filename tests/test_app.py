@@ -102,9 +102,21 @@ def make_unconfigured(monotonic_value=1000.0):
 
 
 @pytest.mark.asyncio
-async def test_no_duration_opens_picker_and_sets_timer():
+async def test_no_duration_shows_default_view_without_picker():
     app = make_unconfigured()
     async with app.run_test() as pilot:
+        await pilot.pause()
+        assert not isinstance(app.screen, DurationModal)
+        assert app._configured is False
+        assert app.state.total_seconds == 0
+
+
+@pytest.mark.asyncio
+async def test_set_timer_from_default_view():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("e")
         await pilot.pause()
         assert isinstance(app.screen, DurationModal)
         await pilot.press("5", "m", "enter")
@@ -115,13 +127,75 @@ async def test_no_duration_opens_picker_and_sets_timer():
 
 
 @pytest.mark.asyncio
-async def test_cancel_picker_with_no_timer_exits():
+async def test_cancel_picker_keeps_default_view():
     app = make_unconfigured()
     async with app.run_test() as pilot:
         await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
-    assert app.return_code is not None
+        assert not isinstance(app.screen, DurationModal)
+        assert app._configured is False
+    assert app.return_code is None
+
+
+@pytest.mark.asyncio
+async def test_c_key_clears_active_timer():
+    app = make_app(total=300)
+    async with app.run_test() as pilot:
+        assert app._configured
+        await pilot.press("c")
+        assert app._configured is False
+        assert app.state.total_seconds == 0
+
+
+@pytest.mark.asyncio
+async def test_c_key_noop_without_active_timer():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("c")
+        assert app._configured is False
+        assert app.state.total_seconds == 0
+    assert app.return_code is None
+
+
+@pytest.mark.asyncio
+async def test_s_key_toggles_stopwatch():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.stopwatch.running is False
+        await pilot.press("s")
+        assert app.stopwatch.running is True
+        await pilot.press("s")
+        assert app.stopwatch.running is False
+
+
+@pytest.mark.asyncio
+async def test_stopwatch_counts_up_independently():
+    clock = {"t": 1000.0}
+    app = ClockApp(None, monotonic=lambda: clock["t"], wallclock=lambda: T0, fps=60)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        clock["t"] = 1003.0  # 3s elapse with no timer configured
+        await pilot.pause()
+        assert app.stopwatch.elapsed >= 3.0
+        assert app._configured is False
+
+
+@pytest.mark.asyncio
+async def test_c_key_resets_running_stopwatch():
+    app = make_unconfigured()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("s")
+        assert app.stopwatch.running
+        await pilot.press("c")
+        assert app.stopwatch.running is False
+        assert app.stopwatch.elapsed == 0.0
+    assert app.return_code is None
 
 
 @pytest.mark.asyncio
