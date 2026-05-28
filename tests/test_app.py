@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 from clock.app import ClockApp, DurationModal
+from clock.config import DEFAULT_KEYBINDS, Config
 
 T0 = datetime(2026, 5, 28, 14, 33, 0)
 
@@ -58,6 +59,19 @@ async def test_wide_viewport_does_not_scroll():
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
         assert app.query_one("#scroll").max_scroll_y == 0
+
+
+@pytest.mark.asyncio
+async def test_rebound_quit_key():
+    cfg = Config(keybinds={**DEFAULT_KEYBINDS, "quit": ("x",)})
+    app = ClockApp(300, config=cfg, monotonic=lambda: 1000.0, wallclock=lambda: T0, fps=60)
+    async with app.run_test() as pilot:
+        await pilot.press("q")  # no longer bound to quit
+        await pilot.pause()
+        assert app.return_code is None
+        await pilot.press("x")  # rebound quit
+        await pilot.pause()
+    assert app.return_code is not None
 
 
 @pytest.mark.asyncio

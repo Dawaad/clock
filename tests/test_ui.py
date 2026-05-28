@@ -90,6 +90,13 @@ def test_renders_on_short_screen_without_error():
     assert "ELAPSED" in strip(out)
 
 
+def test_custom_colors_change_background():
+    from clock.config import Colors
+
+    co = Colors(bg=(16, 16, 18))
+    assert "48;2;16;16;18" in render(state(), (110, 40), co)
+
+
 def test_is_narrow_threshold():
     from clock.ui import NARROW_W, is_narrow
 
