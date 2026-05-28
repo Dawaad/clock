@@ -30,3 +30,17 @@ def test_non_tty_refuses(capsys):
     rc = main(["30"])
     assert rc == 1
     assert "interactive terminal" in capsys.readouterr().err
+
+
+def test_list_themes_prints_and_exits(capsys):
+    rc = main(["--list-themes"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "cream" in out
+    assert "gruvbox" in out
+
+
+def test_unknown_theme_errors():
+    with pytest.raises(SystemExit) as exc:
+        main(["5m", "--theme", "bogus"])
+    assert exc.value.code == 2

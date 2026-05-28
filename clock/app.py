@@ -13,12 +13,13 @@ from typing import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.color import Color
 from textual.containers import Horizontal, VerticalScroll, Vertical
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, Static
 
-from .config import Config
+from .config import Colors, Config
 from .parse import DurationError, parse_duration
 from .state import advance, apply_key, new_timer, with_now
 from .ui import STACK_MIN_H, is_narrow, render
@@ -39,29 +40,23 @@ class DurationModal(ModalScreen[int | None]):
     Dismisses with the parsed seconds on submit, or ``None`` on cancel.
     """
 
+    # Layout only; colors are applied from the active palette in on_mount so the
+    # prompt matches whatever --theme is in effect.
     CSS = """
     DurationModal { align: center middle; }
-    #dialog {
-        width: 56; height: auto;
-        background: rgb(237,234,226);
-        border: round rgb(203,200,192);
-        padding: 1 2;
-    }
+    #dialog { width: 56; height: auto; padding: 1 2; }
     #prompt { height: 3; }
-    #chip {
-        background: rgb(198,72,56); color: rgb(237,234,226);
-        padding: 0 1; margin: 1 2 0 0; text-style: bold;
-    }
-    #dur {
-        background: rgb(237,234,226); color: rgb(30,30,32);
-        border: tall rgb(203,200,192); height: 3;
-    }
-    #dur:focus { border: tall rgb(198,72,56); }
-    #error { color: rgb(198,72,56); height: 1; }
-    #hint { color: rgb(138,136,130); height: 1; }
+    #chip { padding: 0 1; margin: 1 2 0 0; text-style: bold; }
+    #dur { height: 3; }
+    #error { height: 1; }
+    #hint { height: 1; }
     """
 
     BINDINGS = [("escape", "cancel", "cancel")]
+
+    def __init__(self, colors: Colors) -> None:
+        super().__init__()
+        self._co = colors
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -72,7 +67,22 @@ class DurationModal(ModalScreen[int | None]):
             yield Label("[enter] start    [esc] cancel", id="hint")
 
     def on_mount(self) -> None:
-        self.query_one("#dur", Input).focus()
+        co = self._co
+        bg, ink, soft = Color(*co.bg), Color(*co.ink), Color(*co.ink_soft)
+        faint, accent = Color(*co.faint), Color(*co.accent)
+        dialog = self.query_one("#dialog")
+        dialog.styles.background = bg
+        dialog.styles.border = ("round", faint)
+        chip = self.query_one("#chip")
+        chip.styles.background = accent
+        chip.styles.color = bg
+        inp = self.query_one("#dur", Input)
+        inp.styles.background = bg
+        inp.styles.color = ink
+        inp.styles.border = ("tall", faint)
+        self.query_one("#error", Label).styles.color = accent
+        self.query_one("#hint", Label).styles.color = soft
+        inp.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         try:
@@ -123,6 +133,7 @@ class ClockApp(App):
             yield Static(id="frame")
 
     def on_mount(self) -> None:
+        self.screen.styles.background = Color(*self._cfg.colors.bg)
         self._last = self._monotonic()
         self.set_interval(1 / self._fps, self._tick)
         self._draw()
@@ -167,7 +178,7 @@ class ClockApp(App):
             self._scroll(key)
 
     def _open_picker(self) -> None:
-        self.push_screen(DurationModal(), self._on_duration_chosen)
+        self.push_screen(DurationModal(self._cfg.colors), self._on_duration_chosen)
 
     def _on_duration_chosen(self, total: int | None) -> None:
         if total is None:

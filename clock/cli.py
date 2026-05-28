@@ -7,7 +7,7 @@ import sys
 
 from . import __version__
 from .app import run
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, theme_names
 from .parse import DurationError, parse_duration
 
 _EXAMPLES = (
@@ -34,6 +34,16 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="path to a config file (overrides the discovered user/system config)",
     )
+    parser.add_argument(
+        "--theme",
+        metavar="NAME",
+        help="built-in palette to use (see --list-themes)",
+    )
+    parser.add_argument(
+        "--list-themes",
+        action="store_true",
+        help="list the built-in themes and exit",
+    )
     parser.add_argument("--version", action="version", version=f"clock {__version__}")
     return parser
 
@@ -41,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.list_themes:
+        for name in theme_names():
+            print(name)
+        return 0
 
     total: int | None = None
     if args.duration is not None:
@@ -50,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))  # prints usage + message, exits 2
 
     try:
-        config = load_config(args.config)
+        config = load_config(args.config, theme=args.theme)
     except ConfigError as exc:
         parser.error(str(exc))  # prints usage + message, exits 2
 

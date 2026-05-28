@@ -1,11 +1,14 @@
 import pytest
 
 from clock.config import (
+    BUILTIN_THEMES,
     DEFAULT_KEYBINDS,
+    DEFAULT_THEME,
     Colors,
     Config,
     ConfigError,
     load_config,
+    theme_names,
 )
 from clock import theme
 
@@ -81,3 +84,33 @@ def test_malformed_toml_errors(isolate_config):
     write(isolate_config, "this is = = not toml")
     with pytest.raises(ConfigError):
         load_config()
+
+
+def test_default_theme_is_cream():
+    assert DEFAULT_THEME == "cream"
+    assert theme_names()[0] == "cream"
+    assert BUILTIN_THEMES["cream"] == Colors()
+
+
+def test_theme_override_selects_palette():
+    cfg = load_config(theme="dark")
+    assert cfg.colors == BUILTIN_THEMES["dark"]
+    assert cfg.colors.bg == (24, 24, 27)
+
+
+def test_file_theme_with_color_override_layers(isolate_config):
+    write(isolate_config, 'theme = "nord"\n[colors]\naccent = "#ffffff"\n')
+    cfg = load_config()
+    assert cfg.colors.bg == BUILTIN_THEMES["nord"].bg  # from theme
+    assert cfg.colors.accent == (255, 255, 255)  # overridden on top
+
+
+def test_cli_theme_beats_file_theme(isolate_config):
+    write(isolate_config, 'theme = "nord"\n')
+    cfg = load_config(theme="gruvbox")
+    assert cfg.colors == BUILTIN_THEMES["gruvbox"]
+
+
+def test_unknown_theme_errors():
+    with pytest.raises(ConfigError, match="unknown theme"):
+        load_config(theme="bogus")

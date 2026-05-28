@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Mapping
 
@@ -58,6 +58,44 @@ class Colors:
     accent: RGB = theme.ACCENT
 
 
+# Ready-to-go palettes, rofi-style. "cream" is the shipped default; a user
+# picks another with --theme NAME or `theme = "..."` and may still override
+# individual colors via the [colors] table.
+DEFAULT_THEME = "cream"
+
+BUILTIN_THEMES: dict[str, Colors] = {
+    "cream": Colors(),
+    "dark": Colors(
+        bg=(24, 24, 27), ink=(235, 235, 232), ink_soft=(140, 140, 145),
+        faint=(60, 60, 66), accent=(220, 120, 90),
+    ),
+    "gruvbox": Colors(
+        bg=(40, 40, 40), ink=(235, 219, 178), ink_soft=(168, 153, 132),
+        faint=(80, 73, 69), accent=(251, 73, 52),
+    ),
+    "solarized-dark": Colors(
+        bg=(0, 43, 54), ink=(147, 161, 161), ink_soft=(88, 110, 117),
+        faint=(7, 54, 66), accent=(203, 75, 22),
+    ),
+    "solarized-light": Colors(
+        bg=(253, 246, 227), ink=(101, 123, 131), ink_soft=(147, 161, 161),
+        faint=(238, 232, 213), accent=(203, 75, 22),
+    ),
+    "nord": Colors(
+        bg=(46, 52, 64), ink=(236, 239, 244), ink_soft=(123, 136, 161),
+        faint=(76, 86, 106), accent=(191, 97, 106),
+    ),
+    "matrix": Colors(
+        bg=(10, 12, 10), ink=(120, 230, 140), ink_soft=(60, 130, 80),
+        faint=(30, 60, 40), accent=(180, 255, 180),
+    ),
+}
+
+
+def theme_names() -> list[str]:
+    return list(BUILTIN_THEMES)
+
+
 @dataclass(frozen=True)
 class Config:
     colors: Colors = field(default_factory=Colors)
@@ -73,7 +111,7 @@ def _parse_hex(value: str) -> RGB:
     return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
 
 
-def _build_colors(data: object) -> Colors:
+def _build_colors(data: object, base: Colors) -> Colors:
     if not isinstance(data, dict):
         raise ConfigError("[colors] must be a table")
     known = {f.name for f in fields(Colors)}
@@ -82,7 +120,7 @@ def _build_colors(data: object) -> Colors:
         if key not in known:
             raise ConfigError(f"unknown color {key!r}; valid: {sorted(known)}")
         overrides[key] = _parse_hex(value)
-    return Colors(**overrides)
+    return replace(base, **overrides)
 
 
 def _build_keybinds(data: object) -> dict[str, tuple[str, ...]]:
@@ -102,8 +140,20 @@ def _build_keybinds(data: object) -> dict[str, tuple[str, ...]]:
     return binds
 
 
-def _config_from_dict(data: dict) -> Config:
-    colors = _build_colors(data["colors"]) if "colors" in data else Colors()
+def _resolve_theme(data: dict, override: str | None) -> Colors:
+    name = override or data.get("theme") or DEFAULT_THEME
+    if not isinstance(name, str):
+        raise ConfigError("theme must be a string")
+    if name not in BUILTIN_THEMES:
+        raise ConfigError(
+            f"unknown theme {name!r}; available: {sorted(BUILTIN_THEMES)}"
+        )
+    return BUILTIN_THEMES[name]
+
+
+def _config_from_dict(data: dict, theme_override: str | None) -> Config:
+    base = _resolve_theme(data, theme_override)
+    colors = _build_colors(data["colors"], base) if "colors" in data else base
     keybinds = _build_keybinds(data["keybinds"]) if "keybinds" in data else dict(
         DEFAULT_KEYBINDS
     )
@@ -122,8 +172,14 @@ def _discover_paths(explicit: Path | None) -> list[Path]:
     return paths
 
 
-def load_config(path: Path | str | None = None) -> Config:
-    """Merge config files in precedence order into a single :class:`Config`."""
+def load_config(
+    path: Path | str | None = None,
+    theme: str | None = None,
+) -> Config:
+    """Merge config files in precedence order into a single :class:`Config`.
+
+    ``theme`` is a CLI-level override that wins over a file's ``theme`` key.
+    """
     explicit = Path(path) if path is not None else None
     if explicit is not None and not explicit.is_file():
         raise ConfigError(f"config file not found: {explicit}")
@@ -138,4 +194,4 @@ def load_config(path: Path | str | None = None) -> Config:
             raise ConfigError(f"could not read {p}: {exc}") from exc
         # Section-level merge is enough: later files replace whole tables.
         merged.update(data)
-    return _config_from_dict(merged)
+    return _config_from_dict(merged, theme)
